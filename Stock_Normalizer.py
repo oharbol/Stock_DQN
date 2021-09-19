@@ -17,8 +17,8 @@ class Stock_Normalizer:
         #Data used for transfering textfiles to csv
         self.stock = stock
         #Year,Month,Date
-        self.o_time = (2021,6,11) #(2016,1,5)
-        self.e_time = (2021,6,30)
+        self.o_time = (2016,1,4) #(2016,1,5)
+        self.e_time = (2021,9,17)
         #self.num_weeks = 9
         self.months = [31,28,31,30,31,30,31,31,30,31,30,31]
         self.stock = stock
@@ -26,6 +26,8 @@ class Stock_Normalizer:
         self.month = self.o_time[1]
         self.day = self.o_time[2]
         self.start_date = "{}-{}-{}".format(self.year,self.month,self.day)
+
+        #Indicator data
         self.SMMA = {}
         self.SMMA_offset = {}
         self.RSI = {}
@@ -50,13 +52,13 @@ class Stock_Normalizer:
         curr_date = self.o_time
         #fields = ['date', 'open','high', 'low', 'close', 'rsi']
         #Loop until at end of text files
-        #while(curr_date != self.e_time):
-        for k in range(0,15):
+        while(curr_date != self.e_time):
+        #for k in range(0,56):
             try:
                 with open("./data/{}.csv".format(filename), 'a', newline= '') as csvfile:
                     writer = csv.writer(csvfile)
                     #writer.writerow(fields)
-                    with open('./data/{}_{}-{}-{}.txt'.format(stock, curr_date[0], curr_date[1], curr_date[2])) as f:
+                    with open('./data/{}/{}_{}-{}-{}.txt'.format(stock, stock, curr_date[0], curr_date[1], curr_date[2])) as f:
                         j = f.readline()
                         #Loop until end of file
                         while(j != ""):
@@ -119,16 +121,16 @@ class Stock_Normalizer:
 
     #Takes stock data from csv file and writes it to another csv
     def Normalize_Stock(self, data_filename, norm_filename):
-        df = pd.read_csv('{}.csv'.format(data_filename))
-        names = ['open', 'high', 'low', 'close'] #TODO: Add rsi, and alligator bars
-        df = pd.read_csv('{}.csv'.format("test"), names= names)
+        #df = pd.read_csv('./data/{}.csv'.format(data_filename))
+        names = ['open', 'high', 'low', 'close', 'lips', 'teeth', 'jaw', 'rsi']
+        df = pd.read_csv('./data/{}.csv'.format(data_filename), names = names)
         print(df.head)
         array = df.values
         X = array[0:534090] #Magic number BAD!! TODO: Find way to read total number of lines in csv
         scaler = MinMaxScaler(feature_range=(0, 1))
         rescaledX = scaler.fit_transform(X)
         numpy.set_printoptions(precision=3)
-        with open("{}.csv".format(norm_filename), 'a', newline= '') as csvfile:
+        with open("./data/{}.csv".format(norm_filename), 'a', newline= '') as csvfile:
             writer = csv.writer(csvfile)
             for i in rescaledX:
                 writer.writerow(i)
@@ -228,5 +230,23 @@ class Stock_Normalizer:
 
 
 norm = Stock_Normalizer()
-#norm.Convert_TXT_CSV("AAPL", "NewTest")
-norm.AddIndicators("AAPL", "NewTest", "CompleteTest")
+norm.Convert_TXT_CSV("AAPL", "AAPL_raw")
+norm.AddIndicators("AAPL", "AAPL_raw", "AAPL_complete")
+norm.Normalize_Stock("AAPL_complete", "AAPL_norm")
+
+# f = open("./data/CompleteTest.csv", newline= '')
+# print(next(f).split(","))
+# open_f, high_f, low_f, close_f, lips, teeth, jaw, rsi = next(f).split(",")
+# print(open_f)
+# print(high_f)
+# print(low_f)
+# print(close_f)
+# print(lips)
+# print(teeth)
+# print(jaw)
+# print(float(rsi))
+# k = float(j.split(",")[-1])
+# print(k + 1)
+# j = next(f)
+# print(j)
+# f.close
