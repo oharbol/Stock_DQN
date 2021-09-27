@@ -17,45 +17,83 @@ import csv
 
 
 
-LOAD_MODEL = None#"models/3000ep__2X64_stock_0_____0.92max____0.91avg____0.90min.model" #None #Or None
+LOAD_MODEL = None#"models/7210ep__1X64_2X64_stock_1____29.47max___22.12avg__221.21min.model"#"models/3000ep__2X64_stock_0_____0.92max____0.91avg____0.90min.model" #None #Or None
 
 STOCK = "AAPL"
+SKIP = 50000
+#0      : Min
+#100000 : 
+#200000 : 
+#402500 : 
+#400119 : Max
+
 
 DISCOUNT = 0.99
-REPLAY_MEMORY_SIZE = 100_000  # How many last steps to keep for model training
-MIN_REPLAY_MEMORY_SIZE = 1_000  # Minimum number of steps in a memory to start training
-MINIBATCH_SIZE = 128  # How many steps (samples) to use for training
-UPDATE_TARGET_EVERY = 2  # Terminal states (end of episodes)
-MODEL_NAME = '2X64_stock_1'
-MIN_REWARD = -1  # For model save
+REPLAY_MEMORY_SIZE = 10_000  # How many last steps to keep for model training
+MIN_REPLAY_MEMORY_SIZE = 500  # Minimum number of steps in a memory to start training
+MINIBATCH_SIZE = 256  # How many steps (samples) to use for training
+UPDATE_TARGET_EVERY = 1  # Terminal states (end of episodes)
+MODEL_NAME = '1X64_2X64_stock_0'
+MIN_REWARD = 1000  # For model save
 MEMORY_FRACTION = 0.20
 
 # Environment settings
-EPISODES = 15000
+EPISODES = 3000
 # Exploration settings
 epsilon = 1  # not a constant, going to be decayed
-EPSILON_DECAY = 0.9995 #0.99975
-MIN_EPSILON = 0.001
+EPSILON_DECAY = 0.99 #0.99975
+MIN_EPSILON = 0.01
 
 #  Stats settings
-AGGREGATE_STATS_EVERY = 100  # episodes
+AGGREGATE_STATS_EVERY = 10  # episodes
+
+#stock_norm2
+# MAX_VAL = 327.85
+# MIN_VAL = 89.47
+# RANGE = 238.38
+
+#stock_norm3
+MAX_VAL = 156.3
+MIN_VAL = 89.47
+RANGE = 66.83
 
 def convert(input):
-  open_f, high_f, low_f, close_f, lips, teeth, jaw, rsi = input.split(",")
-  state = [np.float(open_f), np.float(high_f), np.float(low_f), np.float(close_f), np.float(lips), np.float(teeth), np.float(jaw), np.float(rsi), 0, 0]
-  # print("convert")
-  # print(type(state))
-  # print(type(np.array(state)))
+  time, open_f, high_f, low_f, close_f, lips, teeth, jaw, rsi, macd = input.split(",")
+  state = [np.float(time), np.float(open_f), np.float(high_f), np.float(low_f), np.float(close_f), np.float(lips), np.float(teeth), np.float(jaw), np.float(rsi), np.float(macd), 0, 0]
   return np.array(state)
   
 
 class StockEnv:
+    #TODO: Need to test different weights on Buying and Selling
+    #   Add reward for buying action, make selling = reward + buy_reward
+    #     - Need this to incentivise the AI to buy more often. Currently taking way too long
+    #   Try making loss and gain a fixed reward
+    #     - This would make any loss dramaticly bad and any gain significantly good
+    #   Add a holding penalty so that the AI doesn't hold a stock for long???
+    #     - This could be unnecissary. Should keep note in the event that this occurs.
+    #     - Could force the AI to be a high frequency trading bot
     ACTION_SPACE = 3
-    HOLD_PENALTY = 0.05
-    GAIN_MULT = 25
-    LOSS_MULT = 100
+    HOLD_PENALTY = 1.5
+    GAIN_MULT = 250
+    LOSS_MULT = 1000
     holding = 0
     holding_price = 0
+
+    #Fixed Rewards
+    BUY_REWARD = 30
+    GAIN_REWARD = 500
+    LOSS_PENALTY = 500
+
+    # Worked Well
+    # BUY_REWARD = 30
+    # GAIN_REWARD = 15
+    # LOSS_PENALTY = 600
+    # HOLD_PENALTY = 1.5
+
+    #Default
+    # BUY_REWARD = 30
+    # GAIN_REWARD = 15
+    # LOSS_PENALTY = 500
     
     # def reset(self):
     #     with open("./data/{}_callibration.csv".format(STOCK), newline= '') as f:
@@ -63,6 +101,8 @@ class StockEnv:
     #         open_f, high_f, low_f, close_f, lips, teeth, jaw, rsi = reader[0].split(",")
     #     return (float(open_f), float(high_f), float(low_f), float(close_f), float(lips), float(teeth), float(jaw), float(rsi))
 
+
+    #Evaluates each action and returns the new state
     def step(self, action, line):
       # 0 = buy
       # 1 = sell
@@ -70,22 +110,31 @@ class StockEnv:
       terminal_state = False
       gain_loss = 0
       reward = 0
-      open_f, high_f, low_f, close_f, lips, teeth, jaw, rsi = line.split(",")
+      
+      time, open_f, high_f, low_f, close_f, lips, teeth, jaw, rsi, macd = line.split(",")
       if(action == 0 and self.holding == 0):
           self.holding = 1
           self.holding_price = float(open_f)
-          reward = -self.HOLD_PENALTY
+          reward = self.BUY_REWARD
       elif(action == 1 and self.holding == 1):
           terminal_state = True
-          gain_loss = float(open_f) - self.holding_price
+          #When using normalized data must unnormalize the given data to get actual gian_loss value
+          gain_loss = (float(open_f) * RANGE + MIN_VAL) - (self.holding_price * RANGE + MIN_VAL)
+          #gain_loss = float(open_f) - self.holding_price
           if(gain_loss > 0):
-            reward = gain_loss * self.GAIN_MULT
+            #reward = gain_loss * self.GAIN_MULT
+            reward = self.GAIN_REWARD * gain_loss
           else:
-            reward = gain_loss * -self.LOSS_MULT
+            #reward = gain_loss * self.LOSS_MULT
+            reward = self.LOSS_PENALTY * gain_loss
           self.holding = 0
           self.holding_price = 0
+      #apply hold penalty
+      elif(action == 2 and self.holding == 1):
+          reward = -self.HOLD_PENALTY
       
-      state = [np.float(open_f), np.float(high_f), np.float(low_f), np.float(close_f), np.float(lips), np.float(teeth), np.float(jaw), np.float(rsi), self.holding, self.holding_price]
+      #gain_loss = gain_loss * RANGE + MIN_VAL
+      state = [np.float(time), np.float(open_f), np.float(high_f), np.float(low_f), np.float(close_f), np.float(lips), np.float(teeth), np.float(jaw), np.float(rsi), np.float(macd), self.holding, self.holding_price]
       return np.array(state), reward, terminal_state, gain_loss
 
 
@@ -169,15 +218,18 @@ class DQNAgent:
 
         else:
           model = Sequential()
-          model.add(Dense(64, input_shape=(10,))) #Change activation space to be (8) ohlc, lips, teeth, jaw, rsi
+          model.add(Dense(64, input_shape=(12,))) #Change activation space to be (8) ohlc, lips, teeth, jaw, rsi
           model.add(Activation('relu'))
+          model.add(Dropout(0.2))
 
 
-          model.add(Dense(128))
+          model.add(Dense(64))
           model.add(Activation('relu'))
+          model.add(Dropout(0.2))
 
-          model.add(Dense(128))
+          model.add(Dense(64))
           model.add(Activation('relu'))
+          model.add(Dropout(0.2))
 
           #buy, hold, sell
           model.add(Dense(3, activation='linear'))
@@ -206,18 +258,7 @@ class DQNAgent:
     
         #Need to do this to prevent errors FUCK!!
         current_states = np.asarray(current_states).astype(np.float)
-        # again = np.array([transition[0] for transition in minibatch])
-        # print("again")
-        # print(again)
 
-        # Normalize data
-        # for index, i in enumerate(current_states):
-        #   current_states[index][0] = i[0] / MAX_POSX
-        #   current_states[index][1] = i[1] / MAX_POSY
-        #   current_states[index][2] = i[2] / MAX_VELX
-        #   current_states[index][3] = i[3] / MAX_VELY
-        #   current_states[index][4] = i[4] / MAX_ANGLE
-        #   current_states[index][5] = i[5] / MAX_ANGVEL
 
         current_qs_list = self.model.predict(current_states)
         #print(current_qs_list)
@@ -225,16 +266,6 @@ class DQNAgent:
         # Get future states from minibatch, then query NN model for Q values
         # When using target network, query it, otherwise main network should be queried
         new_current_states = np.array([transition[3] for transition in minibatch])
-        # Normalize data
-        # for index, i in enumerate(new_current_states):
-        #   new_current_states[index][0] = i[0] / MAX_POSX
-        #   new_current_states[index][1] = i[1] / MAX_POSY
-        #   new_current_states[index][2] = i[2] / MAX_VELX
-        #   new_current_states[index][3] = i[3] / MAX_VELY
-        #   new_current_states[index][4] = i[4] / MAX_ANGLE
-        #   new_current_states[index][5] = i[5] / MAX_ANGVEL
-
-        #print(new_current_states)
 
         future_qs_list = self.target_model.predict(new_current_states)
 
@@ -263,19 +294,9 @@ class DQNAgent:
 
             y.append(current_qs)
 
-        # Normalize X data
-        # for index, i in enumerate(X):
-        #   X[index][0] = i[0] / MAX_POSX
-        #   X[index][1] = i[1] / MAX_POSY
-        #   X[index][2] = i[2] / MAX_VELX
-        #   X[index][3] = i[3] / MAX_VELY
-        #   X[index][4] = i[4] / MAX_ANGLE
-        #   X[index][5] = i[5] / MAX_ANGVEL
-        #print(y)
-
         # Fit on all samples as one batch, log only on terminal state
         self.model.fit(np.array(X), np.array(y), batch_size=MINIBATCH_SIZE, verbose=0, shuffle=False, callbacks=[self.tensorboard] if terminal_state else None)
-        #print("HERE3")
+
         # Update target network counter every episode
         if terminal_state:
             self.target_update_counter += 1
@@ -297,12 +318,16 @@ ep_rewards = [0]
 ep_gain = [0]
 
 # open csv of normalized data
-state_file = open("./data/{}_norm.csv".format(STOCK))
+state_file = open("./data/{}_norm3.csv".format(STOCK))
+for i in range(0,SKIP):
+    current_state = next(state_file)
 current_state = convert(next(state_file)) #env.reset()
 
 days = 0
 step = 1
 profit = 0
+num_gains = 0
+num_losses = 0
 # Iterate over episodes
 for episode in tqdm(range(1, EPISODES + 1), ascii=True, unit='episodes'):
     # Update tensorboard step every episode
@@ -327,6 +352,11 @@ for episode in tqdm(range(1, EPISODES + 1), ascii=True, unit='episodes'):
 
         #get the next ohlc, alligator, and rsi
         line = next(state_file)
+
+        #force sell at end of day
+        # if current_state[0] == 1 or current_state[0] == 0.998410174880763:
+        #   action = 1
+          #print("HERE")
         #add gain_loss variable
         new_state, reward, done, gain_loss = env.step(action, line)
 
@@ -335,6 +365,10 @@ for episode in tqdm(range(1, EPISODES + 1), ascii=True, unit='episodes'):
         episode_gain += gain_loss
         profit += gain_loss
 
+        if gain_loss > 0:
+          num_gains += 1
+        else:
+          num_losses += 1
         # Every step we update replay memory and train main network
         agent.update_replay_memory((current_state, action, reward, new_state, done))
         agent.train(done)
@@ -344,26 +378,34 @@ for episode in tqdm(range(1, EPISODES + 1), ascii=True, unit='episodes'):
         if(step == 390):
           step = 1
           days += 1
-        #print(step)
+          print(days) #comment out while training
 
     # Append episode reward to a list and log stats (every given number of episodes)
     ep_rewards.append(episode_reward)
     ep_gain.append(episode_gain)
     if not episode % AGGREGATE_STATS_EVERY or episode == 1:
         average_reward = sum(ep_rewards[-AGGREGATE_STATS_EVERY:])/len(ep_rewards[-AGGREGATE_STATS_EVERY:])
-        average_gain = sum(ep_gain[-AGGREGATE_STATS_EVERY:])/len(ep_gain[-AGGREGATE_STATS_EVERY:])
-        min_reward = min(ep_rewards[-AGGREGATE_STATS_EVERY:])
+        average_gain = sum(ep_gain[-AGGREGATE_STATS_EVERY:])
+        min_reward = sum(ep_rewards[-AGGREGATE_STATS_EVERY:])
         max_reward = max(ep_rewards[-AGGREGATE_STATS_EVERY:])
-        agent.tensorboard.update_stats(reward_avg=average_reward, reward_min=min_reward, reward_max=max_reward, epsilon=epsilon, gain_loss=average_gain, profit=profit)
+        agent.tensorboard.update_stats(epsilon=epsilon, gain_loss=average_gain, profit=profit, min_reward=min_reward)
 
         # Save model, but only when min reward is greater or equal a set value
-        if min_reward >= MIN_REWARD:
+        if average_gain >= MIN_REWARD:
             agent.model.save(f'models/{episode}ep__{MODEL_NAME}__{max_reward:_>7.2f}max_{average_reward:_>7.2f}avg_{min_reward:_>7.2f}min.model')
+        print(days)
 
     # Decay epsilon
     if epsilon > MIN_EPSILON:
         epsilon *= EPSILON_DECAY
         epsilon = max(MIN_EPSILON, epsilon)
+    else:
+        epsilon = 0
+
+state_file.close() 
 print()
 print(days)
-state_file.close()
+print()
+print("# Wins: {}".format(num_gains))
+print("# Loss: {}".format(num_losses))
+print("% Win-Rate: {}".format(num_gains/(num_gains+num_losses)))
