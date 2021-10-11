@@ -10,8 +10,8 @@ import time
 # r = requests.get(config.CLOCK, headers=config.HEADERS)
 # time_end = r.json()['timestamp']
 # print(time_end)
-o_time = (2021,9,6)
-num_weeks = 15
+o_time = (2021,9,17)
+num_weeks = 4
 months = [31,28,31,30,31,30,31,31,30,31,30,31]
 stock = 'AAPL'
 year = o_time[0]

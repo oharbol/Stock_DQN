@@ -17,8 +17,8 @@ class Stock_Normalizer:
         #Data used for transfering textfiles to csv
         self.stock = stock
         #Year,Month,Date
-        self.o_time = (2016,1,4) #(2016,1,5)
-        self.e_time = (2021,9,17)
+        self.o_time = (2016,1,6) #(2016,1,5)
+        self.e_time = (2021,10,11)
         #self.num_weeks = 9
         self.months = [31,28,31,30,31,30,31,31,30,31,30,31]
         self.stock = stock
@@ -31,6 +31,26 @@ class Stock_Normalizer:
         self.SMMA = {}
         self.SMMA_offset = {}
         self.RSI = {}
+
+        #EMA
+        self.CONST_9 = 9
+        self.CONST_12 = 12
+        self.CONST_26 = 26
+
+        self.N_9 = 2 / 10
+        self.N_12 = 2 / 13
+        self.N_26 = 2 / 27
+
+        #[EMA_12, EMA_26]
+        self.EMA = {}
+
+        #MACD
+        #integer
+        self.MACD = {}
+        #list
+        self.EMA_MACD = {}
+        #int
+        self.MACD_Hist = {}
 
     #Increase the date by one day and adjust month and year as needed
     def __increment_date(self, year, month, day):
@@ -62,8 +82,9 @@ class Stock_Normalizer:
                         j = f.readline()
                         #Loop until end of file
                         while(j != ""):
-                            j = j.strip()
-                            writer.writerow(j.split(",")[1:])
+                            j = j.strip().split(",")
+                            j[0] = self.Convert_Time(j[0])
+                            writer.writerow(j)
                             j = f.readline()
             except FileNotFoundError:
                 print("Skipped Day")
@@ -71,6 +92,9 @@ class Stock_Normalizer:
 
 
             curr_date = self.__increment_date(curr_date[0], curr_date[1], curr_date[2])
+    
+    def Convert_Time(self, time_t):
+        return time_t[11:16].replace(":","")
 
     #Take the raw ohlc data and add the rsi and alligator indicators to it
     #open, high, low, close, lips, teeth, jaw, rsi
@@ -83,40 +107,74 @@ class Stock_Normalizer:
             with open("./data/{}.csv".format(filename_read), newline= '') as f:
                 reader = csv.reader(f, delimiter=' ')
                 #value to keep track of
-                counter = 0
+                #counter = 0
                 prev = 0
                 close_list = []
-                for row in reader:
-                    #only need to update based on new 
-                    if(counter >= 15):
-                        self.Update_SMMA(stock, float(row[0].split(",")[3]))
-                        self.update_RSI(stock, float(row[0].split(",")[3]), prev)
-                        temp = row[0]+","+str(self.SMMA[stock][0])+","+str(self.SMMA[stock][1])+","+str(self.SMMA[stock][2])+","+str(self.RSI[stock][2])
-                        writer.writerow(temp.split(","))
-                        prev = float(row[0].split(",")[3])
+                hist_ema_list = []
 
-                    #otherwise add row data to ohlc_list
-                    else:
-                        close_f = float(row[0].split(",")[3])
+                for counter, row in enumerate(reader):
+                    close_f = float(row[0].split(",")[3])
+
+                    if(counter <= 25):
                         close_list.append(close_f)
 
+                    #Add EMA counter for ema_12 and ema_26
+                    if(counter == 25):
+                        self.Add_EMA(stock, close_list[-12:], self.CONST_12, 0)
+                        self.Add_EMA(stock, close_list, self.CONST_26, 1)
+                    
+                    
+                    if(counter >= 26):
+                        #update ema_12 and ema_26 counters
+                        self.Update_EMA(stock, close_f, self.N_12, 0)
+                        self.Update_EMA(stock, close_f, self.N_26, 1)
+                        #calclate macd
+                        self.Update_MACD(stock) 
+
+                        if(counter <= 34):
+                            #add last macd
+                            hist_ema_list.append(self.MACD[stock])
+
+                            if(counter == 34):
+                                self.Add_HIST_EMA(stock, hist_ema_list)
+                                self.Update_MACDHist(stock)
+                        
+                        else:
+                            self.Update_HIST_EMA(stock, self.N_9)
+                            self.Update_MACDHist(stock)
+                    
+                    if(counter >= 15):
+                        self.Update_SMMA(stock, close_f)
+                        #print(self.SMMA_offset)
+                        self.update_RSI(stock, close_f, prev)
+                        
+                        prev = close_f
+
+                    #otherwise add row data to ohlc_list
+                    elif(counter == 14):
+                        
+                        
+
                         #when 15 values have been counted, call AddRSIandAli
-                        if(counter == 14):
-                            #rsi
-                            self.Add_RSI(stock, close_list)
-                            print(self.RSI)
-                            #pop so there are only 13 values for alligator indicator
-                            close_list.pop(0)
-                            close_list.pop(0)
-                            self.Add_Alligator(stock, close_list)
-                            temp = row[0]+","+str(self.SMMA[stock][0])+","+str(self.SMMA[stock][1])+","+str(self.SMMA[stock][2])+","+str(self.RSI[stock][2])
-                            writer.writerow(temp.split(","))
 
-                            #keep track of previous
-                            prev = float(row[0].split(",")[3])
+                        #rsi
+                        self.Add_RSI(stock, close_list)
+                        #print(self.RSI)
+                        #pop so there are only 13 values for alligator indicator
+                        #close_list.pop(0)
+                        #close_list.pop(0)
+                        self.Add_Alligator(stock, close_list[-13:])
+                        #print(self.MACD_Hist[stock])
 
-                    #increment each line
-                    counter += 1
+                        # temp = row[0]+","+str(self.SMMA[stock][0])+","+str(self.SMMA[stock][1])+","+str(self.SMMA[stock][2])+","+str(self.RSI[stock][2])+","+str(self.MACD_Hist[stock])
+                        # writer.writerow(temp.split(","))
+
+                        #keep track of previous
+                        prev = close_f
+                    
+                    if(counter >= 34):
+                        temp = row[0]+","+str(self.SMMA[stock][0])+","+str(self.SMMA[stock][1])+","+str(self.SMMA[stock][2])+","+str(self.RSI[stock][2])+","+str(self.MACD_Hist[stock])
+                        writer.writerow(temp.split(","))
             
 
     #Takes stock data from csv file and writes it to another csv
@@ -126,7 +184,7 @@ class Stock_Normalizer:
         df = pd.read_csv('./data/{}.csv'.format(data_filename), names = names)
         print(df.head)
         array = df.values
-        X = array[0:534090] #Magic number BAD!! TODO: Find way to read total number of lines in csv
+        X = array[0:552948] #Magic number BAD!! TODO: Find way to read total number of lines in csv
         scaler = MinMaxScaler(feature_range=(0, 1))
         rescaledX = scaler.fit_transform(X)
         numpy.set_printoptions(precision=3)
@@ -149,9 +207,9 @@ class Stock_Normalizer:
         # for i in last:
         #   close_data.append(float(i[4]))
         #lips
-        lips = sum(close_list[8:13]) / 5
+        lips = sum(close_list[8:]) / 5
         #teeth
-        teeth = sum(close_list[5:13]) / 8
+        teeth = sum(close_list[5:]) / 8
         #jaw
         jaw = sum(close_list) / 13
 
@@ -195,6 +253,12 @@ class Stock_Normalizer:
         self.SMMA_offset[stock] = (0,0,0)
         self.RSI[stock] = (0,0,0)
 
+        self.EMA_MACD[stock] = 0
+        self.MACD[stock] = 0
+        self.MACD_Hist[stock] = 0
+
+        self.EMA[stock] = [0,0]
+
     #Conducted the first time
     def Add_RSI(self, stock, close_list):
         loss = 0
@@ -228,11 +292,30 @@ class Stock_Normalizer:
         rs = avg_gain / avg_loss
         self.RSI[stock] = (avg_gain, avg_loss, 100 - (100 / (1+rs)))
 
+    #Conducts a SMA of a list of close data
+    def Add_EMA(self, stock, list_close, n, index):
+        self.EMA[stock][index] = sum(list_close) / n
+
+    def Update_EMA(self, stock, close, k, index):
+        self.EMA[stock][index] = (close - self.EMA[stock][index]) * k + self.EMA[stock][index]
+    
+    def Add_HIST_EMA(self, stock, list_ema):
+        self.EMA_MACD[stock] = sum(list_ema) / self.CONST_9
+    
+    def Update_HIST_EMA(self, stock, k):
+        self.EMA_MACD[stock] = (self.MACD[stock] - self.EMA_MACD[stock]) * k + self.EMA_MACD[stock]
+
+    def Update_MACD(self, stock):
+        self.MACD[stock] = self.EMA[stock][0] - self.EMA[stock][1]
+
+    def Update_MACDHist(self, stock):
+        self.MACD_Hist[stock] = self.MACD[stock] - self.EMA_MACD[stock]
+
 
 norm = Stock_Normalizer()
-norm.Convert_TXT_CSV("AAPL", "AAPL_raw")
-norm.AddIndicators("AAPL", "AAPL_raw", "AAPL_complete")
-norm.Normalize_Stock("AAPL_complete", "AAPL_norm")
+#norm.Convert_TXT_CSV("AAPL", "AAPL_rawtest")
+norm.AddIndicators("AAPL", "AAPL_rawtest", "AAPL_completetest")
+#norm.Normalize_Stock("AAPL_complete", "AAPL_norm")
 
 # f = open("./data/CompleteTest.csv", newline= '')
 # print(next(f).split(","))
